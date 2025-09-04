@@ -12,4 +12,6 @@ RUN pip install --user -r requirements.txt
 
 ENV PYTHONUNBUFFERED=1
 
+RUN python -c "from insightface.app import FaceAnalysis; app = FaceAnalysis(); app.prepare(ctx_id=-1)"
+
 CMD [ "python", "process_frames.py" ]

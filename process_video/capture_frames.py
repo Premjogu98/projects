@@ -1,4 +1,5 @@
 import cv2
+import time
 import logging
 from confluent_kafka import Producer
 from confluent_kafka.admin import AdminClient, NewTopic
@@ -11,14 +12,11 @@ logger = logging.getLogger()
 class ProcessStream:
     def __init__(self):
         self.topic_name = "video-to-frames"
+        self.partition = 0
         self.producer = Producer(
             {
-                "bootstrap.servers": "192.168.1.123:9094,192.168.1.123:9095,192.168.1.123:9096",
-                "security.protocol": "SASL_PLAINTEXT",
-                "sasl.username": "admin",
-                "sasl.password": "admin-secret",
-                "sasl.mechanism": "PLAIN",
-                "message.timeout.ms": 10000,
+                "bootstrap.servers": "192.168.15.212:9094",
+                "security.protocol": "PLAINTEXT",
                 "compression.type": "snappy",
                 "message.max.bytes": 5242880,
                 "partitioner": "murmur2",
@@ -27,16 +25,13 @@ class ProcessStream:
         try:
             admin_client = AdminClient(
                 {
-                    "bootstrap.servers": "192.168.1.123:9094,192.168.1.123:9095,192.168.1.123:9096",
-                    "security.protocol": "SASL_PLAINTEXT",
-                    "sasl.username": "admin",
-                    "sasl.password": "admin-secret",
-                    "sasl.mechanism": "PLAIN",
+                    "bootstrap.servers": "192.168.15.212:9094",
+                    "security.protocol": "PLAINTEXT",
                 }
             )
 
             topic = NewTopic(
-                topic=self.topic_name, num_partitions=1, replication_factor=1
+                topic=self.topic_name, num_partitions=30, replication_factor=1
             )
             fs = admin_client.create_topics([topic])
             for topic_name, future in fs.items():
@@ -79,13 +74,17 @@ class ProcessStream:
 
                 if frame_count % frame_interval == 0:
                     try:
+                        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 90]
+                        _, buffer = cv2.imencode(".jpg", frame, encode_param)
                         self.producer.produce(
                             topic=self.topic_name,
-                            key=f"video_{sent_frames}",
-                            value=frame.tobytes(),
+                            key=f"camera_{self.partition}",
+                            value=buffer.tobytes(),
                             callback=self._delivery_report,
+                            partition=self.partition,
                         )
                         self.producer.flush()
+                        time.sleep(1)
                         sent_frames += 1
                         logger.info(f"Queued frame {sent_frames}")
 
@@ -100,4 +99,4 @@ class ProcessStream:
 
 
 processStream = ProcessStream()
-processStream.process_video("/home/prem/projects/projects/sample_04_out.mp4")
+processStream.process_video("./sample_04.mp4")
