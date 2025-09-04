@@ -1,0 +1,103 @@
+import cv2
+import logging
+from confluent_kafka import Producer
+from confluent_kafka.admin import AdminClient, NewTopic
+from confluent_kafka import KafkaError
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger()
+
+
+class ProcessStream:
+    def __init__(self):
+        self.topic_name = "video-to-frames"
+        self.producer = Producer(
+            {
+                "bootstrap.servers": "192.168.1.123:9094,192.168.1.123:9095,192.168.1.123:9096",
+                "security.protocol": "SASL_PLAINTEXT",
+                "sasl.username": "admin",
+                "sasl.password": "admin-secret",
+                "sasl.mechanism": "PLAIN",
+                "message.timeout.ms": 10000,
+                "compression.type": "snappy",
+                "message.max.bytes": 5242880,
+                "partitioner": "murmur2",
+            }
+        )
+        try:
+            admin_client = AdminClient(
+                {
+                    "bootstrap.servers": "192.168.1.123:9094,192.168.1.123:9095,192.168.1.123:9096",
+                    "security.protocol": "SASL_PLAINTEXT",
+                    "sasl.username": "admin",
+                    "sasl.password": "admin-secret",
+                    "sasl.mechanism": "PLAIN",
+                }
+            )
+
+            topic = NewTopic(
+                topic=self.topic_name, num_partitions=1, replication_factor=1
+            )
+            fs = admin_client.create_topics([topic])
+            for topic_name, future in fs.items():
+                try:
+                    future.result()
+                    logger.info(f"Topic {topic_name} created")
+                except Exception as e:
+                    logger.warning(f"Failed to create topic {topic_name}: {e}")
+        except KafkaError as e:
+            logger.warning(e)
+
+    def _delivery_report(self, err, msg):
+        if err is not None:
+            logger.error(f"Message delivery failed: {err}")
+        else:
+            logger.debug(
+                f"Message delivered to {msg.topic()} [{msg.partition()}] at offset {msg.offset()}"
+            )
+
+    def process_video(self, video_path, fps=25):
+        try:
+            cap = cv2.VideoCapture(video_path)
+
+            if not cap.isOpened():
+                logger.error(f"Error: failed to open video {video_path}")
+                return
+
+            original_fps = cap.get(cv2.CAP_PROP_FPS)
+
+            frame_interval = max(1, int(original_fps / fps)) if original_fps > 0 else 1
+            frame_count = 0
+            sent_frames = 0
+
+            while True:
+                ret, frame = cap.read()
+
+                if not ret:
+                    logger.info("End of video reached")
+                    break
+
+                if frame_count % frame_interval == 0:
+                    try:
+                        self.producer.produce(
+                            topic=self.topic_name,
+                            key=f"video_{sent_frames}",
+                            value=frame.tobytes(),
+                            callback=self._delivery_report,
+                        )
+                        self.producer.flush()
+                        sent_frames += 1
+                        logger.info(f"Queued frame {sent_frames}")
+
+                    except Exception as e:
+                        logger.error(f"Error processing frame {frame_count}: {str(e)}")
+
+                frame_count += 1
+            cap.release()
+
+        except Exception as e:
+            logger.error(f"Error processing video: {str(e)}")
+
+
+processStream = ProcessStream()
+processStream.process_video("/home/prem/projects/projects/sample_04_out.mp4")
