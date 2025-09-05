@@ -18,4 +18,4 @@ COPY --chown=testuser:testuser . .
 
 ENV PYTHONUNBUFFERED=1
 
-CMD ["python", "capture_frames.py"]
+CMD ["python", "people_count.py"]

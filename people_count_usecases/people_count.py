@@ -5,8 +5,17 @@ import json
 import os
 import datetime
 from confluent_kafka import Consumer, KafkaError, TopicPartition
-from confluent_kafka.admin import AdminClient, NewTopic
+
+# from confluent_kafka.admin import AdminClient, NewTopic
 import mongoengine
+from mongoengine import (
+    Document,
+    StringField,
+    ListField,
+    IntField,
+    DictField,
+    DateTimeField,
+)
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -15,34 +24,45 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
 
 
+class CameraStats(Document):
+    camera_id = StringField(required=True)
+    person_ids = ListField(IntField())
+    ages = ListField(IntField())
+    genders = ListField(StringField())
+    total_persons = IntField(default=0)
+    avg_age = IntField(default=0)
+    gender_ratio = DictField()
+    timestamp = DateTimeField(default=datetime.datetime.utcnow)
+
+
 class PeopleCountUsecase:
     def __init__(self):
         self.topic_name = "people-count"
-        try:
-            admin_client = AdminClient(
-                {
-                    "bootstrap.servers": "192.168.15.212:9094",
-                    "security.protocol": "PLAINTEXT",
-                }
-            )
+        # try:
+        #     admin_client = AdminClient(
+        #         {
+        #             "bootstrap.servers": "0.0.0.0:9094",
+        #             "security.protocol": "PLAINTEXT",
+        #         }
+        #     )
 
-            topic = NewTopic(
-                topic=self.topic_name, num_partitions=30, replication_factor=1
-            )
-            fs = admin_client.create_topics([topic])
-            for topic_name, future in fs.items():
-                try:
-                    future.result()
-                    logger.info(f"Topic {topic_name} created")
-                except Exception as e:
-                    logger.warning(f"Failed to create topic {topic_name}: {e}")
-        except KafkaError as e:
-            logger.warning(e)
+        #     topic = NewTopic(
+        #         topic=self.topic_name, num_partitions=30, replication_factor=1
+        #     )
+        #     fs = admin_client.create_topics([topic])
+        #     for topic_name, future in fs.items():
+        #         try:
+        #             future.result()
+        #             logger.info(f"Topic {topic_name} created")
+        #         except Exception as e:
+        #             logger.warning(f"Failed to create topic {topic_name}: {e}")
+        # except KafkaError as e:
+        #     logger.warning(e)
 
         self.consumer = self.create_consumer()
 
-        # self.consumer.subscribe([self.topic_name])
-        self.consumer.assign([TopicPartition(self.topic_name, 0)])
+        self.consumer.subscribe([self.topic_name])
+        # self.consumer.assign([TopicPartition(self.topic_name, 0)])
 
         mongoengine.connect(
             os.getenv("DB_NAME"),
@@ -60,7 +80,7 @@ class PeopleCountUsecase:
     def create_consumer(self):
         return Consumer(
             **{
-                "bootstrap.servers": "192.168.15.212:9094",
+                "bootstrap.servers": "0.0.0.0:9094",
                 "security.protocol": "PLAINTEXT",
                 "auto.offset.reset": "latest",
                 "group.id": "consume-detection",
@@ -103,6 +123,7 @@ class PeopleCountUsecase:
                 else:
                     data = json.loads(message.value().decode("utf-8"))
                     camera_id = message.key().decode("utf-8")
+
                     frame = self.consume_from_source(
                         topic="video-to-frames",
                         partition=message.partition(),
@@ -111,12 +132,13 @@ class PeopleCountUsecase:
                     raw_bytes = np.frombuffer(frame, dtype=np.uint8)
                     raw_image = cv2.imdecode(raw_bytes, cv2.IMREAD_COLOR)
 
-                    if message.key() not in self.object_tracking:
+                    if camera_id not in self.object_tracking:
                         self.object_tracking[camera_id] = {
                             "person_ids": [],
                             "age": [],
                             "gender": [],
                         }
+
                     for detection in data["data"]:
                         cv2.rectangle(
                             raw_image,
@@ -147,8 +169,7 @@ class PeopleCountUsecase:
                             self.object_tracking[camera_id]["gender"].append(
                                 detection["gender"]
                             )
-                    # if (datetime.datetime.utcnow() - self.start_time).seconds >= 5:
-                    # logger.info(self.object_tracking)
+
                     info = self.object_tracking[camera_id]
                     person_ids = info["person_ids"]
                     ages = info["age"]
@@ -166,6 +187,21 @@ class PeopleCountUsecase:
                         gender: f"{(count/total_persons)*100:.1f}%"
                         for gender, count in gender_counts.items()
                     }
+
+                    if (datetime.datetime.utcnow() - self.start_time).seconds >= 5:
+                        CameraStats(
+                            camera_id=camera_id,
+                            person_ids=person_ids,
+                            ages=ages,
+                            genders=genders,
+                            total_persons=total_persons,
+                            avg_age=avg_age,
+                            gender_ratio=gender_ratio,
+                            timestamp=datetime.datetime.utcnow(),
+                        ).save()
+
+                        # Reset timer
+                        self.start_time = datetime.datetime.utcnow()
 
                     print(f"{camera_id}:")
                     print(f"  Total persons: {total_persons}")
@@ -221,5 +257,6 @@ class PeopleCountUsecase:
                     )
 
 
-peopleCountUsecase = PeopleCountUsecase()
-peopleCountUsecase.process_data()
+if __name__ == "__main__":
+    peopleCountUsecase = PeopleCountUsecase()
+    peopleCountUsecase.process_data()

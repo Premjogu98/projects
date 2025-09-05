@@ -1,9 +1,11 @@
 import cv2
 import time
+import os
 import logging
 from confluent_kafka import Producer
-from confluent_kafka.admin import AdminClient, NewTopic
-from confluent_kafka import KafkaError
+
+# from confluent_kafka.admin import AdminClient, NewTopic
+# from confluent_kafka import KafkaError
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
@@ -12,36 +14,36 @@ logger = logging.getLogger()
 class ProcessStream:
     def __init__(self):
         self.topic_name = "video-to-frames"
-        self.partition = 0
+        self.partition = int(os.environ.get("PARTITION", 0))
         self.producer = Producer(
             {
-                "bootstrap.servers": "192.168.15.212:9094",
+                "bootstrap.servers": "0.0.0.0:9094",
                 "security.protocol": "PLAINTEXT",
                 "compression.type": "snappy",
                 "message.max.bytes": 5242880,
                 "partitioner": "murmur2",
             }
         )
-        try:
-            admin_client = AdminClient(
-                {
-                    "bootstrap.servers": "192.168.15.212:9094",
-                    "security.protocol": "PLAINTEXT",
-                }
-            )
+        # try:
+        #     admin_client = AdminClient(
+        #         {
+        #             "bootstrap.servers": "0.0.0.0:9094",
+        #             "security.protocol": "PLAINTEXT",
+        #         }
+        #     )
 
-            topic = NewTopic(
-                topic=self.topic_name, num_partitions=30, replication_factor=1
-            )
-            fs = admin_client.create_topics([topic])
-            for topic_name, future in fs.items():
-                try:
-                    future.result()
-                    logger.info(f"Topic {topic_name} created")
-                except Exception as e:
-                    logger.warning(f"Failed to create topic {topic_name}: {e}")
-        except KafkaError as e:
-            logger.warning(e)
+        #     topic = NewTopic(
+        #         topic=self.topic_name, num_partitions=30, replication_factor=1
+        #     )
+        #     fs = admin_client.create_topics([topic])
+        #     for topic_name, future in fs.items():
+        #         try:
+        #             future.result()
+        #             logger.info(f"Topic {topic_name} created")
+        #         except Exception as e:
+        #             logger.warning(f"Failed to create topic {topic_name}: {e}")
+        # except KafkaError as e:
+        #     logger.warning(e)
 
     def _delivery_report(self, err, msg):
         if err is not None:
@@ -98,5 +100,6 @@ class ProcessStream:
             logger.error(f"Error processing video: {str(e)}")
 
 
-processStream = ProcessStream()
-processStream.process_video("./sample_04.mp4")
+if __name__ == "__main__":
+    processStream = ProcessStream()
+    processStream.process_video("./sample_04.mp4")
