@@ -26,6 +26,7 @@ services:
       - kafka_data:/var/lib/kafka/data
     networks:
       - kafka_network
+    
 
   kafka-ui:
     container_name: kafka-ui
